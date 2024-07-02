@@ -269,6 +269,7 @@ public final class Genson {
    * writer instance you also must ensure to call close on it when you are done.
    */
   public void serialize(Object object, Type type, ObjectWriter writer, Context ctx) {
+    recursionCheck(ctx);
     Serializer<Object> ser = provideConverter(type);
     try {
       ser.serialize(object, writer, ctx);
@@ -377,6 +378,8 @@ public final class Genson {
   }
 
   public <T> T deserialize(GenericType<T> type, ObjectReader reader, Context ctx) {
+    recursionCheck(ctx);
+
     Deserializer<T> deser = provideConverter(type.getType());
     try {
       return deser.deserialize(reader, ctx);
@@ -420,6 +423,7 @@ public final class Genson {
    * @return the object enriched with the properties from the stream.
    */
   public <T> T deserializeInto(ObjectReader reader, T object, Context ctx) {
+    recursionCheck(ctx);
     BeanDescriptor<T> bd = (BeanDescriptor<T>) getBeanDescriptorProvider().provide(object.getClass(), this);
     bd.deserialize(object, reader, ctx);
     return object;
@@ -475,6 +479,7 @@ public final class Genson {
         if (!hasNext()) throw new NoSuchElementException();
         reader.next();
         try {
+          recursionCheck(ctx);
           return converter.deserialize(reader, ctx);
         } catch (Exception e) {
           throw new JsonBindingException("Could not deserialize to type " + type.getRawClass(), e);
@@ -615,5 +620,26 @@ public final class Genson {
   @Deprecated
   public static class Builder extends GensonBuilder {
 
+  }
+
+  /**
+   * Updates a counter in the provided context, initializing it to 0 if the counter does not yet exist, throwing a
+   * runtime exception when a threshold has been reached.
+   *
+   * This intends to guard against excessive recursion, causing stack overflow errors.
+   *
+   * @param ctx The context on which to maintain a counter
+   * @throws IllegalStateException When the counter on the context has been increased too often.
+   */
+  public void recursionCheck(Context ctx) {
+    Integer recursionDepth = ctx.get("recursion-depth", Integer.class);
+    if (recursionDepth == null) {
+      recursionDepth = 0;
+    }
+    if (recursionDepth >= 1000) { // Arbitrary value to guard against stack-overflow.
+      throw new IllegalStateException("Max depth limit reached. Unable to recursively deserialize object.");
+    }
+    recursionDepth++;
+    ctx.store("recursion-depth", recursionDepth);
   }
 }
